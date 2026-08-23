@@ -18,7 +18,9 @@ from metaads.commands import audiences
 from metaads.commands.audiences import (
     build_users_payload,
     build_website_rule,
+    build_lookalike_spec,
     cmd_audience_create_customerlist,
+    cmd_audience_create_lookalike,
     cmd_audience_create_website,
     load_customer_csv,
     normalize_email,
@@ -289,3 +291,81 @@ def test_website_create_sends_no_subtype(monkeypatch, capsys):
         description=None, confirm=True, json=False))
     assert "subtype" not in seen
     assert "rule" in seen and seen["retention_days"] == 180
+
+
+# ---------------------------------------------------------------------------
+# Lookalikes
+# ---------------------------------------------------------------------------
+
+def _lal_args(**over):
+    base = dict(account_id="act_1000000", name="LAL 1% web", source_id="AUD1",
+                country="ua", ratio=1.0, starting_ratio=None, description=None,
+                confirm=False, json=False)
+    base.update(over)
+    return Namespace(**base)
+
+
+def test_lookalike_spec_uses_fraction_not_percent():
+    assert build_lookalike_spec("ua", 0.01) == {"country": "UA", "ratio": 0.01}
+
+
+def test_lookalike_spec_band_keeps_both_edges():
+    spec = build_lookalike_spec("UA", 0.03, 0.01)
+    assert spec == {"country": "UA", "ratio": 0.03, "starting_ratio": 0.01}
+
+
+def test_lookalike_accepts_percent_and_converts(monkeypatch, capsys):
+    monkeypatch.setattr(api, "_api_call", lambda *a, **k: {"name": "Web Visitors"})
+    cmd_audience_create_lookalike(_lal_args(ratio=3))
+    out = capsys.readouterr().out
+    assert '"ratio": 0.03' in out
+
+
+def test_lookalike_dry_run_makes_no_write(monkeypatch, capsys):
+    def only_reads(method, *a, **k):
+        assert method == "GET", "dry-run must not POST"
+        return {"name": "Web Visitors", "approximate_count_lower_bound": 12000}
+    monkeypatch.setattr(api, "_api_call", only_reads)
+    cmd_audience_create_lookalike(_lal_args())
+    out = capsys.readouterr().out
+    assert "DRY-RUN" in out
+    assert "Web Visitors" in out               # source shown, so a wrong id is visible
+    assert "Add --confirm to execute." in out
+
+
+def test_lookalike_rejects_out_of_range_ratio(monkeypatch):
+    monkeypatch.setattr(api, "_api_call", _boom)
+    with pytest.raises(SystemExit):
+        cmd_audience_create_lookalike(_lal_args(ratio=25))
+
+
+def test_lookalike_rejects_starting_ratio_above_ratio(monkeypatch):
+    monkeypatch.setattr(api, "_api_call", _boom)
+    with pytest.raises(SystemExit):
+        cmd_audience_create_lookalike(_lal_args(ratio=1, starting_ratio=2))
+
+
+def test_lookalike_warns_on_tiny_source(monkeypatch, capsys):
+    monkeypatch.setattr(api, "_api_call",
+                        lambda *a, **k: {"name": "Tiny", "approximate_count_lower_bound": 20})
+    cmd_audience_create_lookalike(_lal_args())
+    err = capsys.readouterr().err
+    assert "at least 100" in err
+
+
+def test_lookalike_confirm_posts_expected_params(monkeypatch):
+    seen = {}
+
+    def fake(method, path, params=None):
+        if method == "GET":
+            return {"name": "Web Visitors"}
+        seen["method"], seen["path"], seen["params"] = method, path, params
+        return {"id": "999"}
+
+    monkeypatch.setattr(api, "_api_call", fake)
+    cmd_audience_create_lookalike(_lal_args(confirm=True))
+    assert seen["method"] == "POST"
+    assert seen["path"] == "act_1000000/customaudiences"
+    assert seen["params"]["subtype"] == "LOOKALIKE"
+    assert seen["params"]["origin_audience_id"] == "AUD1"
+    assert json.loads(seen["params"]["lookalike_spec"]) == {"country": "UA", "ratio": 0.01}

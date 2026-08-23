@@ -1,9 +1,11 @@
-"""Commands: audiences, audience-create-website, audience-create-customerlist.
+"""Commands: audiences, audience-create-website, audience-create-customerlist,
+audience-create-lookalike.
 
 Custom Audiences live on POST /act_<id>/customaudiences. Two flavours here:
 
 * WEBSITE — rule-based on pixel events (e.g. InitiateCheckout minus Purchase).
 * CUSTOM  — a customer list uploaded from CSV.
+* LOOKALIKE — modelled from an existing audience.
 
 Safety note for the customer list: unlike the Ads Manager UI (which hashes on
 Meta's side after upload), the API expects data already hashed. Every email and
@@ -331,6 +333,101 @@ def cmd_audience_create_website(args) -> None:
     else:
         print(f"Audience created: {data.get('id')} \"{args.name}\" (WEBSITE, {args.days} d).")
         _err("Note: a fresh audience needs time to populate before it is usable for targeting.")
+
+
+# ---------------------------------------------------------------------------
+# Lookalikes
+# ---------------------------------------------------------------------------
+
+# Sizes are given in percent of the country's population.
+MIN_LAL_PERCENT = 1.0
+MAX_LAL_PERCENT = 20.0
+
+
+def build_lookalike_spec(country: str, ratio: float,
+                         starting_ratio: float | None = None) -> dict:
+    """Build lookalike_spec.
+
+    Meta wants the ratio as a fraction (0.01 = the closest 1% of the country),
+    not a percentage. A starting_ratio carves out a band — 0.01..0.03 excludes
+    the top 1% so a wider lookalike does not fight a narrower one on the same
+    people. Omit it for a plain top-N% audience.
+    """
+    spec: dict = {"country": country.upper(), "ratio": round(float(ratio), 4)}
+    if starting_ratio is not None:
+        spec["starting_ratio"] = round(float(starting_ratio), 4)
+    return spec
+
+
+def cmd_audience_create_lookalike(args) -> None:
+    """Create a Lookalike Audience from an existing source audience [write]."""
+    account_id = account_of(args)
+
+    # --ratio is always a percent, never a fraction: "1" means the closest 1%.
+    # Accepting both was ambiguous at exactly 1, which is also the default.
+    if not (MIN_LAL_PERCENT <= args.ratio <= MAX_LAL_PERCENT):
+        _die(f"ERROR: --ratio is a percent between {MIN_LAL_PERCENT:g} and "
+             f"{MAX_LAL_PERCENT:g}; got {args.ratio:g}.")
+    ratio = args.ratio / 100.0
+    starting = None
+    if args.starting_ratio is not None:
+        if args.starting_ratio >= args.ratio:
+            _die("ERROR: --starting-ratio must be smaller than --ratio.")
+        starting = args.starting_ratio / 100.0
+
+    spec = build_lookalike_spec(args.country, ratio, starting)
+
+    # Read the source so the dry-run can show what we are actually cloning —
+    # a wrong origin_audience_id is silent otherwise.
+    source_name = "?"
+    try:
+        src = api._api_call("GET", args.source_id,
+                            {"fields": "name,approximate_count_lower_bound,subtype"})
+        source_name = src.get("name", "?")
+        lower = src.get("approximate_count_lower_bound")
+        if isinstance(lower, int) and 0 < lower < 100:
+            _err(f"Warning: source audience reports only ~{lower} people; "
+                 "Meta needs at least 100 (1000+ recommended) to seed a lookalike.")
+    except Exception:  # noqa: BLE001 - a read failure must not block the dry-run
+        _err("Note: could not read the source audience; check the id is correct.")
+
+    params = {
+        "name": args.name,
+        "subtype": "LOOKALIKE",
+        "origin_audience_id": str(args.source_id),
+        "lookalike_spec": json.dumps(spec),
+    }
+    if args.description:
+        params["description"] = args.description
+
+    plan = {"account_id": account_id, "name": args.name, "type": "lookalike",
+            "source_id": str(args.source_id), "source_name": source_name,
+            "lookalike_spec": spec}
+
+    if not args.confirm:
+        if args.json:
+            _output_json({"executed": False, "would_create": plan,
+                          "note": "Add --confirm to execute."})
+            return
+        band = (f"{starting * 100:g}%-{ratio * 100:g}%" if starting is not None
+                else f"top {ratio * 100:g}%")
+        print(f"DRY-RUN: would create LOOKALIKE \"{args.name}\" on {account_id}.")
+        print(f"  Source:  {args.source_id} \"{source_name}\"")
+        print(f"  Country: {spec['country']} | size: {band}")
+        print("  Spec: " + json.dumps(spec, ensure_ascii=False))
+        print("Add --confirm to execute.")
+        return
+
+    data = api._api_call("POST", f"{account_id}/customaudiences", params)
+    result = {"executed": True, "audience_id": data.get("id"), "name": args.name,
+              "subtype": "LOOKALIKE", "source_id": str(args.source_id),
+              "lookalike_spec": spec}
+    if args.json:
+        _output_json(result)
+    else:
+        print(f"Lookalike created: {data.get('id')} \"{args.name}\" "
+              f"from {args.source_id} ({spec['country']}, {ratio * 100:g}%).")
+        _err("Note: Meta takes a few hours to build a lookalike before it can deliver.")
 
 
 def cmd_audience_create_customerlist(args) -> None:

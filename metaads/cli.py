@@ -34,6 +34,7 @@ from metaads.commands.adsets import (
 from metaads.commands.audiences import (
     CUSTOMER_FILE_SOURCES,
     cmd_audience_create_customerlist,
+    cmd_audience_create_lookalike,
     cmd_audience_create_website,
     cmd_audiences,
 )
@@ -472,6 +473,18 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Where the data came from (default USER_PROVIDED_ONLY)")
     sp.add_argument("--preview", type=int, default=3,
                     help="How many hashed sample rows to show in dry-run (default 3)")
+    sp.add_argument("--description")
+
+    sp = _cmd(sub, "audience-create-lookalike", cmd_audience_create_lookalike,
+              "Lookalike Audience from an existing source audience", write=True)
+    sp.add_argument("--name", required=True, help="Audience name")
+    sp.add_argument("--source-id", required=True,
+                    help="Source (seed) custom audience ID")
+    sp.add_argument("--country", default="UA", help="Country code (default UA)")
+    sp.add_argument("--ratio", type=float, default=1.0,
+                    help="Size as percent of the country, 1-20 (default 1)")
+    sp.add_argument("--starting-ratio", type=float,
+                    help="Lower edge of the band, e.g. 1 with --ratio 3")
     sp.add_argument("--description")
 
     # ----- Targeting search -----------------------------------------------

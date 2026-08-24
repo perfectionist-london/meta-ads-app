@@ -72,7 +72,38 @@ from metaads.commands.targeting import (
     cmd_locale_search,
 )
 
+# Meta's effective_status enum grows with each level: an ad set can also be
+# CAMPAIGN_PAUSED, an ad also ADSET_PAUSED and every review state. Listing only
+# ACTIVE/PAUSED silently hides everything that sits under a paused parent —
+# which is exactly what a config snapshot must not do.
 LIST_STATUSES = ["ACTIVE", "PAUSED", "ARCHIVED", "DELETED"]
+CAMPAIGN_LIST_STATUSES = LIST_STATUSES + ["IN_PROCESS", "WITH_ISSUES"]
+ADSET_LIST_STATUSES = CAMPAIGN_LIST_STATUSES + ["CAMPAIGN_PAUSED"]
+AD_LIST_STATUSES = ADSET_LIST_STATUSES + [
+    "ADSET_PAUSED", "DISAPPROVED", "PENDING_REVIEW", "PREAPPROVED",
+    "PENDING_BILLING_INFO",
+]
+
+
+def status_list(allowed):
+    """argparse type for --status: one value or a comma-separated set.
+
+    argparse `choices` cannot validate a comma-joined string, so the check
+    lives here and the error names the offending value, not the whole list.
+    """
+    allowed_set = set(allowed)
+
+    def parse(value):
+        values = [v.strip().upper() for v in str(value).split(",") if v.strip()]
+        if not values:
+            raise argparse.ArgumentTypeError("--status is empty")
+        for v in values:
+            if v not in allowed_set:
+                raise argparse.ArgumentTypeError(
+                    f"'{v}' is not a valid status here. Pick from: {', '.join(allowed)}")
+        return ",".join(values)
+
+    return parse
 STATUS_CHOICES = ["ACTIVE", "PAUSED"]
 UPDATE_STATUS_CHOICES = ["ACTIVE", "PAUSED", "ARCHIVED"]
 COPY_STATUS_CHOICES = ["ACTIVE", "PAUSED", "INHERITED_FROM_SOURCE"]
@@ -167,7 +198,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     # ----- Campaigns ------------------------------------------------------
     sp = _cmd(sub, "campaigns", cmd_campaigns, "List campaigns (DELETED hidden by default)")
-    sp.add_argument("--status", choices=LIST_STATUSES, help="Filter by effective status")
+    sp.add_argument("--status", type=status_list(CAMPAIGN_LIST_STATUSES), metavar="STATUS[,STATUS...]",
+                    help=f"Filter by effective status: {', '.join(CAMPAIGN_LIST_STATUSES)}")
     sp.add_argument("--limit", type=int, default=100)
 
     sp = _cmd(sub, "campaign-detail", cmd_campaign_detail, "Campaign detail incl. Advantage+ state & issues")
@@ -217,7 +249,8 @@ def build_parser() -> argparse.ArgumentParser:
     # ----- Ad sets --------------------------------------------------------
     sp = _cmd(sub, "adsets", cmd_adsets, "List ad sets (DELETED hidden by default)")
     sp.add_argument("--campaign-id", help="Filter by campaign")
-    sp.add_argument("--status", choices=LIST_STATUSES)
+    sp.add_argument("--status", type=status_list(ADSET_LIST_STATUSES), metavar="STATUS[,STATUS...]",
+                    help=f"Filter by effective status: {', '.join(ADSET_LIST_STATUSES)}")
     sp.add_argument("--limit", type=int, default=100)
 
     sp = _cmd(sub, "adset-detail", cmd_adset_detail, "Ad set detail incl. targeting & issues")
@@ -294,7 +327,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp = _cmd(sub, "ads", cmd_ads, "List ads (DELETED hidden by default)")
     sp.add_argument("--adset-id", help="Filter by ad set")
     sp.add_argument("--campaign-id", help="Filter by campaign")
-    sp.add_argument("--status", choices=LIST_STATUSES)
+    sp.add_argument("--status", type=status_list(AD_LIST_STATUSES), metavar="STATUS[,STATUS...]",
+                    help=f"Filter by effective status: {', '.join(AD_LIST_STATUSES)}")
     sp.add_argument("--limit", type=int, default=100)
 
     sp = _cmd(sub, "ad-detail", cmd_ad_detail, "Ad detail incl. creative, issues & review feedback")

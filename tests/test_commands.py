@@ -435,3 +435,46 @@ def test_lead_gen_rejected_on_flex(monkeypatch, capsys):
     with pytest.raises(SystemExit):
         _capture_create(monkeypatch, _flex_args(lead_gen_form_id="42"))
     assert "link/video only" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# --status: several effective_status values in one listing call
+# ---------------------------------------------------------------------------
+
+def test_split_statuses_normalizes_and_trims():
+    assert common.split_statuses("active, adset_paused ") == ["ACTIVE", "ADSET_PAUSED"]
+    assert common.split_statuses("PAUSED") == ["PAUSED"]
+
+
+def test_split_statuses_empty_inputs():
+    assert common.split_statuses(None) == []
+    assert common.split_statuses("") == []
+    assert common.split_statuses(" , ") == []
+
+
+def test_status_filter_param_single_status_unchanged():
+    f = json.loads(common.status_filter_param("ACTIVE")["filtering"])
+    assert f == [{"field": "effective_status", "operator": "IN", "value": ["ACTIVE"]}]
+
+
+def test_status_filter_param_sends_every_status_in_one_call():
+    """One call for the whole set — per-status calls are what trips error 17."""
+    f = json.loads(common.status_filter_param("ACTIVE,PAUSED,ADSET_PAUSED")["filtering"])
+    assert f[0]["value"] == ["ACTIVE", "PAUSED", "ADSET_PAUSED"]
+    assert f[0]["operator"] == "IN"
+
+
+def test_status_filter_param_none_means_no_filter():
+    assert common.status_filter_param(None) == {}
+    assert common.status_filter_param("") == {}
+
+
+def test_drop_deleted_still_hides_deleted_by_default():
+    rows = [{"effective_status": "ACTIVE"}, {"effective_status": "DELETED"}]
+    assert common.drop_deleted(rows, "ACTIVE,PAUSED") == [{"effective_status": "ACTIVE"}]
+
+
+def test_drop_deleted_keeps_deleted_when_asked_inside_a_list():
+    """DELETED anywhere in the set counts as asking for it, not just alone."""
+    rows = [{"effective_status": "ACTIVE"}, {"effective_status": "DELETED"}]
+    assert common.drop_deleted(rows, "PAUSED,deleted") == rows

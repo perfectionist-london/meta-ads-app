@@ -38,13 +38,26 @@ def parse_genders(value: str) -> list[int]:
     return result
 
 
-def status_filter_param(status: str | None) -> dict:
-    """Build the `filtering` param for an effective_status filter."""
+def split_statuses(status: str | None) -> list[str]:
+    """'ACTIVE,adset_paused' -> ['ACTIVE', 'ADSET_PAUSED']. Empty for None."""
     if not status:
+        return []
+    return [s.strip().upper() for s in status.split(",") if s.strip()]
+
+
+def status_filter_param(status: str | None) -> dict:
+    """Build the `filtering` param for an effective_status filter.
+
+    Accepts several statuses at once. One call for the whole set beats one call
+    per status: listing endpoints are the first thing to trip the user-level
+    rate limit (error 17), and a snapshot needs every status anyway.
+    """
+    values = split_statuses(status)
+    if not values:
         return {}
     return {
         "filtering": json.dumps([
-            {"field": "effective_status", "operator": "IN", "value": [status.upper()]}
+            {"field": "effective_status", "operator": "IN", "value": values}
         ])
     }
 
@@ -55,7 +68,7 @@ def drop_deleted(rows: list, status_arg: str | None) -> list:
     Meta keeps deleted entities in edge listings; showing them by default is
     noise (and confused past sessions).
     """
-    if status_arg and status_arg.upper() == "DELETED":
+    if "DELETED" in split_statuses(status_arg):
         return rows
     return [r for r in rows if r.get("effective_status") != "DELETED" and r.get("status") != "DELETED"]
 

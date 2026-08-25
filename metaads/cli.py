@@ -49,6 +49,12 @@ from metaads.commands.campaigns import (
     cmd_campaign_update,
     cmd_campaigns,
 )
+from metaads.commands.catalog import (
+    cmd_catalog_products,
+    cmd_catalogs,
+    cmd_product_set_create,
+    cmd_product_sets,
+)
 from metaads.commands.conversions import cmd_custom_conversions, cmd_pixels
 from metaads.commands.creatives import (
     cmd_creative_clone,
@@ -480,6 +486,26 @@ def build_parser() -> argparse.ArgumentParser:
     _cmd(sub, "pixels", cmd_pixels, "List account pixels/datasets (read-only)")
     sp = _cmd(sub, "custom-conversions", cmd_custom_conversions, "List custom conversions (read-only)")
     sp.add_argument("--limit", type=int, default=100)
+
+    # ----- Product catalogues (need catalog_management) -------------------
+    _cmd(sub, "catalogs", cmd_catalogs, "List product catalogues (read-only)")
+
+    sp = _cmd(sub, "product-sets", cmd_product_sets, "List product sets in a catalogue (read-only)")
+    sp.add_argument("--catalog-id", required=True)
+    sp.add_argument("--limit", type=int, default=100)
+
+    sp = _cmd(sub, "catalog-products", cmd_catalog_products,
+              "List catalogue products; --filter dry-runs a product set (read-only)")
+    sp.add_argument("--catalog-id", required=True)
+    sp.add_argument("--filter", help='Product-set filter JSON, e.g. \'{"product_type": {"i_contains": "T-Shirt"}}\'')
+    sp.add_argument("--limit", type=int, default=100)
+
+    sp = _cmd(sub, "product-set-create", cmd_product_set_create,
+              "Create a product set from a filter", write=True)
+    sp.add_argument("--catalog-id", required=True)
+    sp.add_argument("--name", required=True)
+    sp.add_argument("--filter", required=True,
+                    help='Product-set filter JSON, e.g. \'{"product_type": {"i_contains": "T-Shirt"}}\'')
 
     # ----- Custom audiences -----------------------------------------------
     sp = _cmd(sub, "audiences", cmd_audiences, "List custom audiences (read-only)")

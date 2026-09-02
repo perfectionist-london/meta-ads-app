@@ -1,5 +1,5 @@
 """Commands: audiences, audience-create-website, audience-create-customerlist,
-audience-create-lookalike.
+audience-create-lookalike, audience-add-users.
 
 Custom Audiences live on POST /act_<id>/customaudiences. Two flavours here:
 
@@ -524,3 +524,55 @@ def cmd_audience_create_customerlist(args) -> None:
         print(f"Done: {uploaded} records uploaded to {audience_id}.")
         _err("Note: Meta reports the final match rate only after processing "
              "(check with `audiences`). Audiences under 1000 matches will not deliver.")
+
+
+def cmd_audience_add_users(args) -> None:
+    """Append a customer list to an EXISTING audience (no re-upload of the rest).
+
+    Meta merges on the hashed identifier, so re-sending someone already in the
+    audience is a no-op rather than a duplicate — safe to run on overlapping
+    exports. The audience keeps growing until it is deleted.
+    """
+    records, schema, stats = load_customer_csv(args.file, args.country_code)
+    if not records:
+        _die(f"ERROR: no usable email/phone rows in {args.file}.")
+
+    aud = api._api_call("GET", str(args.audience_id),
+                        {"fields": "name,subtype,approximate_count_lower_bound"})
+    if aud.get("subtype") != "CUSTOM":
+        _die(f"ERROR: audience {args.audience_id} is subtype {aud.get('subtype')}, "
+             "not CUSTOM — only customer-list audiences accept uploaded users.")
+
+    plan = {"audience_id": str(args.audience_id), "audience_name": aud.get("name"),
+            "current_size": aud.get("approximate_count_lower_bound"),
+            "schema": schema, "adding": len(records), **stats}
+
+    if not args.confirm:
+        if args.json:
+            _output_json({"executed": False, "would_add": plan,
+                          "note": "Add --confirm to execute."})
+            return
+        print(f"DRY-RUN: would add {len(records)} people to \"{aud.get('name')}\" "
+              f"(now ~{aud.get('approximate_count_lower_bound')}).")
+        print(f"  Schema: {', '.join(schema)}")
+        print(f"  Rows read {stats['rows']}, usable {stats['uploadable']}, skipped {stats['skipped']}")
+        print("  Sample (masked): " + ", ".join(
+            _mask(next(iter(r.values()))) for r in records[:3]))
+        print("Add --confirm to execute.")
+        return
+
+    sent = 0
+    for i in range(0, len(records), 5000):
+        chunk = records[i:i + 5000]
+        api._api_call("POST", f"{args.audience_id}/users",
+                      {"payload": json.dumps(build_users_payload(chunk, schema))})
+        sent += len(chunk)
+
+    result = {"executed": True, "audience_id": str(args.audience_id),
+              "audience_name": aud.get("name"), "added": sent, "schema": schema}
+    if args.json:
+        _output_json(result)
+    else:
+        print(f"Added {sent} people to \"{aud.get('name')}\" ({args.audience_id}).")
+        print("  Meta dedupes on the hash, so overlapping rows do not double-count.")
+        print("  Size in Ads Manager refreshes within ~an hour.")

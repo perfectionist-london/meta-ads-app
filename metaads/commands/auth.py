@@ -1,4 +1,4 @@
-"""Commands: token-info, token-extend."""
+"""Commands: token-info, token-extend, token-set."""
 
 from __future__ import annotations
 
@@ -68,6 +68,54 @@ def _write_env_token(new_token: str) -> None:
         f.writelines(lines)
     os.chmod(tmp_path, 0o600)
     os.replace(tmp_path, env_path)
+
+
+def cmd_token_set(args) -> None:
+    """Read a fresh token from stdin and write it into .env.
+
+    Stdin, never argv: a token pasted as a command-line argument is kept
+    verbatim in the shell history file and shows up in `ps` while it runs.
+    Prints the scopes afterwards so a token generated without the permission
+    you needed is caught here, not three commands later.
+    """
+    import sys
+
+    if sys.stdin.isatty():
+        print("Paste the access token and press Enter (it is not echoed):")
+        import getpass
+        token = getpass.getpass("").strip()
+    else:
+        token = sys.stdin.read().strip()
+
+    if not token:
+        _die("ERROR: no token on stdin — nothing written.")
+    if " " in token or "\n" in token:
+        _die("ERROR: the pasted value contains whitespace — that is not a token.")
+    if len(token) < 50:
+        _die(f"ERROR: that is only {len(token)} characters; Meta tokens are far longer. "
+             "Did the copy get truncated?")
+
+    data = api._api_call("GET", "debug_token",
+                         {"input_token": token, "access_token": token})
+    info = data.get("data") or {}
+    if not info.get("is_valid"):
+        _die("ERROR: Meta says this token is not valid — nothing written to .env.")
+
+    _write_env_token(token)
+
+    scopes = info.get("scopes") or []
+    if args.json:
+        _output_json({"written": True, "app": info.get("application"),
+                      "scopes": scopes, "expires_at": info.get("expires_at")})
+        return
+    print("Token written to .env (previous one kept in .env.bak).")
+    print(f"  App:    {info.get('application', '---')}")
+    print(f"  Scopes: {', '.join(scopes) or '(none)'}")
+    expires = info.get("expires_at", 0)
+    if expires:
+        exp = datetime.fromtimestamp(expires)
+        print(f"  Expires: {exp:%Y-%m-%d %H:%M} ({(exp - datetime.now()).days} days)")
+        print("  Run `token-extend --write-env` to swap it for a 60-day one.")
 
 
 def cmd_token_extend(args) -> None:

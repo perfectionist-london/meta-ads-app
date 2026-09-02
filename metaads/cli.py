@@ -32,13 +32,14 @@ from metaads.commands.adsets import (
     cmd_adsets,
 )
 from metaads.commands.audiences import (
+    cmd_audience_add_users,
     CUSTOMER_FILE_SOURCES,
     cmd_audience_create_customerlist,
     cmd_audience_create_lookalike,
     cmd_audience_create_website,
     cmd_audiences,
 )
-from metaads.commands.auth import cmd_token_extend, cmd_token_info
+from metaads.commands.auth import cmd_token_extend, cmd_token_info, cmd_token_set
 from metaads.commands.campaigns import (
     OBJECTIVES,
     cmd_budget_schedule,
@@ -199,6 +200,9 @@ def build_parser() -> argparse.ArgumentParser:
     _cmd(sub, "pages", cmd_pages, "List Facebook/Instagram pages for ad creatives")
     _cmd(sub, "api-limits", cmd_api_limits, "Show API usage percent, tier and rate-limit reference")
     _cmd(sub, "token-info", cmd_token_info, "Show access token info and expiry")
+    _cmd(sub, "token-set", cmd_token_set,
+         "Read a new access token from stdin and write it to .env")
+
     sp = _cmd(sub, "token-extend", cmd_token_extend, "Exchange token for long-lived (60 days)")
     sp.add_argument("--write-env", action="store_true", help="Write the new token into .env (backup in .env.bak)")
 
@@ -535,6 +539,12 @@ def build_parser() -> argparse.ArgumentParser:
                     help="How many hashed sample rows to show in dry-run (default 3)")
     sp.add_argument("--description")
 
+    sp = _cmd(sub, "audience-add-users", cmd_audience_add_users,
+              "Append a customer list to an existing CUSTOM audience", write=True)
+    sp.add_argument("--audience-id", required=True)
+    sp.add_argument("--file", required=True, help="CSV with an email and/or phone column")
+    sp.add_argument("--country-code", help="Default country code for bare local numbers, e.g. UA")
+
     sp = _cmd(sub, "audience-create-lookalike", cmd_audience_create_lookalike,
               "Lookalike Audience from an existing source audience", write=True)
     sp.add_argument("--name", required=True, help="Audience name")
@@ -587,7 +597,7 @@ def main() -> None:
         args.account_id = f"act_{args.account_id}"
 
     # Daily-cached token expiry warning on every command except token ops
-    if args.command not in ("token-info", "token-extend"):
+    if args.command not in ("token-info", "token-extend", "token-set"):
         api.maybe_warn_token_expiry()
 
     args.func(args)

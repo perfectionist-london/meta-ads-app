@@ -369,3 +369,59 @@ def test_lookalike_confirm_posts_expected_params(monkeypatch):
     assert seen["params"]["subtype"] == "LOOKALIKE"
     assert seen["params"]["origin_audience_id"] == "AUD1"
     assert json.loads(seen["params"]["lookalike_spec"]) == {"country": "UA", "ratio": 0.01}
+
+
+# ---------------------------------------------------------------------------
+# audience-add-users: append to an existing customer list
+# ---------------------------------------------------------------------------
+
+def _add_args(tmp_path, **kw):
+    csv_path = tmp_path / "c.csv"
+    csv_path.write_text("email,phone\na@b.com,+380971234567\n", encoding="utf-8")
+    base = dict(audience_id="123", file=str(csv_path), country_code="UA",
+                confirm=False, json=True)
+    base.update(kw)
+    return Namespace(**base)
+
+
+def test_add_users_dry_run_writes_nothing(tmp_path, monkeypatch, capsys):
+    calls = []
+
+    def fake(method, path, params=None, **k):
+        calls.append((method, path))
+        return {"name": "list", "subtype": "CUSTOM", "approximate_count_lower_bound": 10}
+
+    monkeypatch.setattr(api, "_api_call", fake)
+    audiences.cmd_audience_add_users(_add_args(tmp_path))
+    out = json.loads(capsys.readouterr().out)
+    assert out["executed"] is False
+    assert out["would_add"]["adding"] == 1
+    assert all(m == "GET" for m, _ in calls)          # no POST without --confirm
+
+
+def test_add_users_refuses_non_custom_audience(tmp_path, monkeypatch, capsys):
+    """A WEBSITE or LOOKALIKE audience cannot take uploaded users."""
+    monkeypatch.setattr(api, "_api_call", lambda *a, **k: {
+        "name": "site", "subtype": "WEBSITE", "approximate_count_lower_bound": 5})
+    with pytest.raises(SystemExit):
+        audiences.cmd_audience_add_users(_add_args(tmp_path, confirm=True))
+    assert "not CUSTOM" in capsys.readouterr().err
+
+
+def test_add_users_posts_only_hashes(tmp_path, monkeypatch, capsys):
+    """The raw email and phone must never leave the machine."""
+    seen = {}
+
+    def fake(method, path, params=None, **k):
+        if method == "GET":
+            return {"name": "list", "subtype": "CUSTOM", "approximate_count_lower_bound": 10}
+        seen["path"] = path
+        seen["payload"] = json.loads(params["payload"])
+        return {}
+
+    monkeypatch.setattr(api, "_api_call", fake)
+    audiences.cmd_audience_add_users(_add_args(tmp_path, confirm=True))
+    assert seen["path"] == "123/users"
+    blob = json.dumps(seen["payload"])
+    assert "a@b.com" not in blob and "380971234567" not in blob
+    assert all(len(v) == 64 for row in seen["payload"]["data"] for v in row if v)

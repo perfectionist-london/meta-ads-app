@@ -35,6 +35,35 @@ Credentials in `.env`: `META_ACCESS_TOKEN` (60-day long-lived), `META_AD_ACCOUNT
 
 Full flags: README.md command tables, or `--help` per command.
 
+## ⚠️ Page identity — read before any write that goes live
+
+A single `.env` default put Gasanova's boutique ad on air under the
+**kaia_fincher** brand on 29.09.2026: 84,944 impressions, $28.44.
+`META_PAGE_ID` pointed at Kaia's page while `--account-id` pointed at
+Gasanova's account, and nothing warned.
+
+This is an agency setup: **20 ad accounts, 37 pages**. That is normal.
+The bug was the silent default, and it is gone.
+
+- `META_PAGE_ID` in `.env` is **empty on purpose**. `--page-id` is required.
+- `metaads/clients.py` holds the account → allowed-pages registry.
+- `creative-create`, `creative-from-post`, `creative-from-ig`, `ig-media`
+  validate the page against the account.
+- `ad-create` and `ad-update --status ACTIVE` read
+  `object_story_spec.page_id` from the creative and **block** a foreign page.
+- Accounts absent from the registry still require an explicit `--page-id`
+  and print a loud warning that no check was possible.
+
+Gotchas found the hard way:
+
+- The `page_id` field on an **adcreative returns Authorization Error**.
+  Read `object_story_spec.page_id` instead.
+- `api._api_call` exits via `SystemExit`, which `except Exception` does
+  **not** catch. Guards must use `BaseException`, otherwise a failed read
+  silently becomes a pass.
+
+Never widen the registry to make a blocked command succeed.
+
 ## Safety
 
 - **Writes default to dry-run** (`execution_options=["validate_only"]`); `--confirm` executes. Endpoints without validate_only (`/copies`, `/budget_schedules`) print a plan and make no call without `--confirm`.

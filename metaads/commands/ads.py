@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from metaads import api
+from metaads import clients
 from metaads.commands.common import (
     account_of,
     delete_with_brake,
@@ -178,6 +179,49 @@ def cmd_ad_review(args) -> None:
             _print_review_info(a, indent="    ")
 
 
+
+def _assert_creative_page(account_id, creative_id, what):
+    """Звірити сторінку креативу з кабінетом ПЕРЕД показом.
+
+    29.09.2026 реклама Gasanova вийшла від імені kaia_fincher на 85 тис.
+    показів, бо оголошення увімкнули, не подивившись page_id креативу.
+    Сторінка Kaia при цьому офіційно дозволена до промо з кабінету
+    Gasanova, тож Meta це пропускає — ловити треба тут.
+    """
+    try:
+        d = api._api_call("GET", str(creative_id),
+                          {"fields": "id,name,object_story_spec,"
+                                     "effective_object_story_id"})
+    except BaseException as e:
+        _die(f"ERROR: не вдалось прочитати сторінку креативу {creative_id} ({e}). "
+             f"Не вмикаю наосліп — саме так реклама Gasanova вийшла від Kaia Fincher.")
+    oss = d.get("object_story_spec") or {}
+    page_id = oss.get("page_id")
+    if not page_id:
+        # Креативи, зроблені з наявного поста, не мають object_story_spec,
+        # зате мають effective_object_story_id у вигляді СТОРІНКА_ПОСТ.
+        story = str(d.get("effective_object_story_id") or "")
+        if "_" in story:
+            page_id = story.split("_", 1)[0]
+    if not page_id:
+        _die(f"ERROR: {what} зупинено.\n"
+             f"  У креативі {creative_id} «{(d.get('name') or '')[:50]}» "
+             f"сторінку визначити не вдалось:\n"
+             f"  немає ні object_story_spec.page_id, ні "
+             f"effective_object_story_id.\n"
+             f"  Перевір вручну в Ads Manager, від кого піде це оголошення. "
+             f"Наосліп не вмикаю.")
+    ok, msg = clients.check(account_id, page_id)
+    if not ok:
+        _die(f"ERROR: {what} зупинено.\n{msg}\n  Креатив: {creative_id} "
+             f"«{(d.get('name') or '')[:50]}»")
+    if msg:
+        print(msg)
+    label = clients.page_label(account_id, page_id)
+    if label:
+        print(f"сторінка {page_id} ({label}) — ok")
+
+
 def cmd_ad_create(args) -> None:
     """Create a new ad (dry-run/validate by default)."""
     account_id = account_of(args)
@@ -189,6 +233,7 @@ def cmd_ad_create(args) -> None:
     }
 
     if args.creative_id:
+        _assert_creative_page(account_id, args.creative_id, "Створення оголошення")
         params["creative"] = json.dumps({"creative_id": args.creative_id})
     elif args.creative_json:
         params["creative"] = args.creative_json
@@ -219,6 +264,19 @@ def cmd_ad_update(args) -> None:
 
     if not params:
         _die("ERROR: No fields to update.")
+
+    if args.status == "ACTIVE" or args.creative_id:
+        account_id = account_of(args)
+        cid = args.creative_id
+        if not cid:
+            try:
+                cid = ((api._api_call("GET", str(args.ad_id),
+                                      {"fields": "creative{id}"}) or {})
+                       .get("creative") or {}).get("id")
+            except Exception as e:
+                print(f"УВАГА: не вдалось прочитати креатив оголошення: {e}")
+        if cid:
+            _assert_creative_page(account_id, cid, "Увімкнення оголошення")
 
     data, executed = api.mutate(str(args.ad_id), params, args.confirm)
 

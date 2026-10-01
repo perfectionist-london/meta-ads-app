@@ -6,7 +6,7 @@ from __future__ import annotations
 import copy
 import json
 
-from metaads import api, lint
+from metaads import api, clients, lint
 from metaads.commands.common import account_of, drop_deleted, parse_json_arg
 from metaads.formatting import _die, _err, _output_json, _truncate
 
@@ -170,6 +170,22 @@ def _build_flex_spec(args, page_id: str, messages: list, headlines: list,
     return {"object_story_spec": json.dumps(oss), "asset_feed_spec": json.dumps(afs)}
 
 
+
+def _resolve_page(args, account_id):
+    """Сторінка ТІЛЬКИ явна, і тільки та, що належить цьому кабінету.
+
+    META_PAGE_ID більше не підставляється мовчки: саме через нього
+    29.09.2026 реклама Gasanova вийшла від імені Kaia Fincher.
+    """
+    page_id = getattr(args, "page_id", None)
+    ok, msg = clients.check(account_id, page_id)
+    if not ok:
+        _die("ERROR: " + msg)
+    if msg:
+        print(msg)
+    return str(page_id)
+
+
 def cmd_creative_create(args) -> None:
     """Create a new ad creative (dry-run/validate by default).
 
@@ -177,10 +193,7 @@ def cmd_creative_create(args) -> None:
     asset_feed_spec (multiple texts + media, no customization rules).
     """
     account_id = account_of(args)
-    page_id = args.page_id or api.META_PAGE_ID
-
-    if not page_id:
-        _die("ERROR: --page-id required (or set META_PAGE_ID in .env).")
+    page_id = _resolve_page(args, account_id)
 
     creative_type = args.type
 
@@ -416,9 +429,7 @@ def cmd_creative_from_post(args) -> None:
 
     post_id = args.post_id
     if "_" not in post_id:
-        page_id = args.page_id or api.META_PAGE_ID
-        if not page_id:
-            _die("ERROR: --post-id without PAGEID_ prefix needs --page-id (or META_PAGE_ID in .env).")
+        page_id = _resolve_page(args, account_id)
         post_id = f"{page_id}_{post_id}"
 
     params: dict = {"name": args.name, "object_story_id": post_id}
@@ -479,9 +490,7 @@ def _resolve_ig_user(page_id: str, account_id: str | None = None) -> dict:
 def cmd_creative_from_ig(args) -> None:
     """Create a creative from an existing Instagram post/Reel (boost organic IG content)."""
     account_id = account_of(args)
-    page_id = args.page_id or api.META_PAGE_ID
-    if not page_id:
-        _die("ERROR: --page-id required (or META_PAGE_ID in .env).")
+    page_id = _resolve_page(args, account_of(args))
 
     ig_user_id = args.ig_user_id
     if not ig_user_id:
@@ -516,9 +525,7 @@ def cmd_creative_from_ig(args) -> None:
 
 def cmd_ig_media(args) -> None:
     """List Instagram media of the page-connected IG account (for creative-from-ig)."""
-    page_id = args.page_id or api.META_PAGE_ID
-    if not page_id:
-        _die("ERROR: --page-id required (or META_PAGE_ID in .env).")
+    page_id = _resolve_page(args, account_of(args))
 
     ig = _resolve_ig_user(page_id, account_of(args))
     fields = "id,caption,media_type,media_product_type,permalink,timestamp,like_count,comments_count"

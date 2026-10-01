@@ -1,5 +1,7 @@
 .env
 .env.bak
+.env.bak*
+.env.*.bak
 venv/
 .venv/
 __pycache__/

@@ -53,6 +53,7 @@ def cmd_catalogs(args) -> None:
     """List product catalogues across the businesses this user can see."""
     _require_catalog_scope()
     rows = []
+    дозволені = set(clients.catalogs_of(account_of(args)))
     for biz in _businesses():
         got = api._paginate(f"{biz['id']}/owned_product_catalogs",
                             {"fields": CATALOG_FIELDS, "limit": 50}, max_items=50)
@@ -60,9 +61,14 @@ def cmd_catalogs(args) -> None:
             c.setdefault("business", {"id": biz["id"], "name": biz.get("name")})
             # ⛔ список віддає і ЧУЖІ каталоги. 02.10.2026 я взяв [0] і це був
             # umahanova.com. Позначаємо явно, щоб індекс не вибирався наосліп.
-            чий = clients.FOREIGN_CATALOGS.get(str(c.get("id")))
-            if чий:
-                c["name"] = f"⛔ ЧУЖИЙ: {c.get('name')}"
+            # ⛔ Чужим вважаємо все, чого немає в дозволених ЦЬОГО кабінету.
+            # Так не потрібен список чужих: будь-який новий каталог іншого
+            # клієнта позначиться сам. 02.10.2026 я взяв catalogs[0] і це
+            # був umahanova.com.
+            if str(c.get("id")) not in дозволені:
+                власник, назва = clients.owner_of(str(c.get("id")), "catalog")
+                мітка = f"⛔ ЧУЖИЙ ({власник})" if власник else "⛔ НЕ НАШ"
+                c["name"] = f"{мітка}: {c.get('name')}"
             rows.append(c)
 
     if args.json:

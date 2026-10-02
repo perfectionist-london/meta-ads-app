@@ -160,6 +160,11 @@ def _build_flex_spec(args, page_id: str, messages: list, headlines: list,
     oss: dict = {"page_id": page_id}
     ig_user_id = getattr(args, "ig_user_id", None)
     if ig_user_id:
+        ok_ig, msg_ig = clients.check_ig(account_id, ig_user_id)
+        if msg_ig:
+            print(msg_ig, file=sys.stderr)
+        if not ok_ig:
+            raise SystemExit(2)
         oss["instagram_user_id"] = ig_user_id
     elif not args.no_enhancements:
         _err("⚠ flex with page-only identity: Meta may demand an Instagram identity "

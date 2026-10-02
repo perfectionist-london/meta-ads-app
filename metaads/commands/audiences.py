@@ -18,10 +18,11 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import sys
 import os
 import random
 
-from metaads import api
+from metaads import api, clients
 from metaads.commands.common import account_of
 from metaads.formatting import _die, _err, _output_json, _truncate
 
@@ -275,6 +276,12 @@ def cmd_audience_create_website(args) -> None:
              "or --url-contains.")
 
     pixel_id = args.pixel_id
+    if pixel_id:
+        ok, msg = clients.check_pixel(account_of(args), pixel_id)
+        if msg:
+            print(msg, file=sys.stderr)
+        if not ok:
+            raise SystemExit(2)
     if not pixel_id:
         pixels = api._paginate(f"{account_id}/adspixels", {"fields": "id,name"}, max_items=10)
         if not pixels:

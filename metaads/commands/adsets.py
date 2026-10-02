@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+import sys
 
-from metaads import api
+from metaads import api, clients
 from metaads.commands.common import (
     account_of,
     delete_with_brake,
@@ -309,6 +310,11 @@ def cmd_adset_update(args) -> None:
                                 {"fields": "promoted_object"}).get("promoted_object", {})
         promoted = dict(current)
         if getattr(args, "pixel_id", None):
+            ok, msg = clients.check_pixel(account_of(args), args.pixel_id)
+            if msg:
+                print(msg, file=sys.stderr)
+            if not ok:
+                raise SystemExit(2)
             promoted["pixel_id"] = str(args.pixel_id)
         if getattr(args, "custom_event_type", None):
             promoted["custom_event_type"] = args.custom_event_type

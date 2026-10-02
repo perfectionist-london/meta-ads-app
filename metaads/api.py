@@ -32,7 +32,27 @@ META_PAGE_ID = os.getenv("META_PAGE_ID", "")
 META_APP_ID = os.getenv("META_APP_ID", "")
 META_APP_SECRET = os.getenv("META_APP_SECRET", "")
 
-API_VERSION = "v25.0"
+# Бамп v25.0 -> v26.0 (2026-10-02). Env-перемикач для відкату без правки коду:
+#   META_API_VERSION=v25.0 ./run.sh ...
+#
+# Три breaking changes v26 перевірені ЕМПІРИЧНО на акаунті Gasanova (sandbox
+# не потрібен: dry-run validate_only дає той самий вердикт, що ostrý create):
+#   1. Instagram Explore у instagram_positions — 96 адсетів мають, усі PAUSED.
+#      Попередження з docs/api-notes.md НЕ ВІДТВОРИЛОСЬ: dry-run update такого
+#      адсета проходить і на v26, і на v25. Найпевніше обмеження лише на CREATE
+#      (docs: "nové je nesmí obsahovat"), create не тестували.
+#   2. special ad categories — усі 112 кампаній NONE або порожньо, вимога
+#      явного advantage_audience нас не зачіпає.
+#   3. Messenger Stories 'story' — один паузований адсет з 2021; за docs поле
+#      тихо відкидається, помилки немає.
+#
+# ⛔ ОКРЕМА ПАСТКА, не пов'язана з версією: 78 легасі-адсетів несуть у
+# targeting поле targeting_optimization, яке Meta видалила. adset-update
+# робить read-merge-write, тож перешиває його назад і запит падає:
+# "The targeting_optimization field has been removed". Падає ОДНАКОВО на v25
+# і v26, тобто це не регресія бампу. Живих адсетів серед цих 78 нуль.
+# Якщо колись оживляти такий адсет — передати --targeting з чистим JSON.
+API_VERSION = os.getenv("META_API_VERSION", "v26.0")
 GRAPH_HOST = "https://graph.facebook.com"
 API_BASE = f"{GRAPH_HOST}/{API_VERSION}"
 

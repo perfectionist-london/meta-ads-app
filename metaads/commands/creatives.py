@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import copy
 import json
+import sys
 
 from metaads import api, clients, lint
 from metaads.commands.common import account_of, drop_deleted, parse_json_arg
@@ -347,7 +348,7 @@ def cmd_creative_clone(args) -> None:
     lint.lint_url(args.new_url)
 
     orig = api._api_call("GET", args.creative_id, {
-        "fields": "object_story_spec,asset_feed_spec,degrees_of_freedom_spec,url_tags",
+        "fields": "object_story_spec,asset_feed_spec,degrees_of_freedom_spec,url_tags,product_set_id",
     })
     afs = copy.deepcopy(orig.get("asset_feed_spec") or {})
     if not afs:
@@ -398,6 +399,26 @@ def cmd_creative_clone(args) -> None:
     url_tags = args.url_tags or orig.get("url_tags")
     if url_tags:
         payload["url_tags"] = url_tags
+    # product_set_id is a top-level creative field on dynamic (catalogue)
+    # creatives. Without it a clone of ANY DPA creative fails outright with
+    # "Dynamic Creative Missing Product Set ID" — so carry it over, and let
+    # --product-set-id point the clone at a different set.
+    product_set_id = getattr(args, "product_set_id", None) or orig.get("product_set_id")
+    if product_set_id:
+        owner = api._api_call("GET", str(product_set_id),
+                              {"fields": "product_catalog{id,name}"})
+        cat = (owner.get("product_catalog") or {})
+        cat_id = cat.get("id")
+        if not cat_id:
+            _die(f"ERROR: product set {product_set_id} returned no owning catalogue "
+                 f"— refusing to build a creative on a set whose owner is unknown.")
+        ok, msg = clients.check_catalog(account_id, cat_id)
+        if msg:
+            print(msg, file=sys.stderr)
+        if not ok:
+            _die(f"ERROR: product set {product_set_id} lives in catalogue {cat_id} "
+                 f"({cat.get('name')}), which is not this client's.")
+        payload["product_set_id"] = str(product_set_id)
     if args.no_enhancements:
         payload["degrees_of_freedom_spec"] = _no_enhancements_spec()
     elif dof:

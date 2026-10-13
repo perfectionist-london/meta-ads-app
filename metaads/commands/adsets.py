@@ -305,10 +305,30 @@ def cmd_adset_update(args) -> None:
 
     # Conversion pixel: read-merge-write so sibling keys on promoted_object
     # (smart_pse_enabled, application_id…) survive the update.
-    if getattr(args, "pixel_id", None) or getattr(args, "custom_event_type", None):
+    if (getattr(args, "pixel_id", None) or getattr(args, "custom_event_type", None)
+            or getattr(args, "product_set_id", None)):
         current = api._api_call("GET", str(args.adset_id),
                                 {"fields": "promoted_object"}).get("promoted_object", {})
         promoted = dict(current)
+        if getattr(args, "product_set_id", None):
+            # A product set carries no owner of its own — resolve it to the
+            # catalogue that holds it and check THAT against the registry.
+            # This is the guard the 02.10 incident needed: catalogs[0] was
+            # umahanova.com, a different client visible from this account.
+            owner = api._api_call("GET", str(args.product_set_id),
+                                  {"fields": "product_catalog{id,name}"})
+            cat = (owner.get("product_catalog") or {})
+            cat_id = cat.get("id")
+            if not cat_id:
+                _die(f"ERROR: product set {args.product_set_id} returned no owning "
+                     f"catalogue — refusing to write a set whose owner is unknown.")
+            ok, msg = clients.check_catalog(account_of(args), cat_id)
+            if msg:
+                print(msg, file=sys.stderr)
+            if not ok:
+                _die(f"ERROR: product set {args.product_set_id} lives in catalogue "
+                     f"{cat_id} ({cat.get('name')}), which is not this client's.")
+            promoted["product_set_id"] = str(args.product_set_id)
         if getattr(args, "pixel_id", None):
             ok, msg = clients.check_pixel(account_of(args), args.pixel_id)
             if msg:
@@ -320,8 +340,8 @@ def cmd_adset_update(args) -> None:
             promoted["custom_event_type"] = args.custom_event_type
         if promoted != current:
             params["promoted_object"] = json.dumps(promoted)
-            _err(f"Note: promoted_object {current} → {promoted}. Changing the pixel or "
-                 f"event resets this ad set's learning phase.")
+            _err(f"Note: promoted_object {current} → {promoted}. Changing the pixel, "
+                 f"event or product set resets this ad set's learning phase.")
 
     if not params:
         _die("ERROR: No fields to update.")

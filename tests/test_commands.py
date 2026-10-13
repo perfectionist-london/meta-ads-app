@@ -478,3 +478,61 @@ def test_drop_deleted_keeps_deleted_when_asked_inside_a_list():
     """DELETED anywhere in the set counts as asking for it, not just alone."""
     rows = [{"effective_status": "ACTIVE"}, {"effective_status": "DELETED"}]
     assert common.drop_deleted(rows, "PAUSED,deleted") == rows
+
+
+# ---------------------------------------------------------------------------
+# creative-clone: product_set_id carry-over (DPA creatives were unclonable)
+# ---------------------------------------------------------------------------
+
+def _clone_mocks(monkeypatch, source, catalogue=None, catalogue_ok=True):
+    """Two different GETs happen: the source creative, then the set's owner."""
+    captured: dict = {}
+    calls: list = []
+
+    def fake_get(method, endpoint, params=None, **k):
+        calls.append(str(endpoint))
+        if str(endpoint) == "777":
+            return source
+        return {"product_catalog": catalogue} if catalogue is not None else {}
+
+    monkeypatch.setattr(api, "_api_call", fake_get)
+    monkeypatch.setattr(api, "mutate",
+                        lambda endpoint, params, confirm, **k: captured.update(params) or ({}, False))
+    monkeypatch.setattr(creatives.clients, "check_catalog",
+                        lambda acct, cat: (catalogue_ok, None))
+    return captured, calls
+
+
+def test_clone_carries_product_set_id(monkeypatch):
+    """Without this the API rejects the clone: Dynamic Creative Missing Product Set ID."""
+    source = _clone_source(product_set_id="555")
+    captured, calls = _clone_mocks(monkeypatch, source,
+                                   catalogue={"id": "cat1", "name": "GASANOVA MAIN"})
+    creatives.cmd_creative_clone(_clone_args())
+    assert captured["product_set_id"] == "555"
+    assert "555" in calls, "the set must be resolved to its owning catalogue"
+
+
+def test_clone_product_set_override_wins(monkeypatch):
+    source = _clone_source(product_set_id="555")
+    captured, _ = _clone_mocks(monkeypatch, source,
+                               catalogue={"id": "cat1", "name": "GASANOVA MAIN"})
+    creatives.cmd_creative_clone(_clone_args(product_set_id="999"))
+    assert captured["product_set_id"] == "999"
+
+
+def test_clone_refuses_product_set_from_foreign_catalogue(monkeypatch):
+    """The 02.10 incident in reverse: a set whose catalogue is another client's."""
+    source = _clone_source(product_set_id="555")
+    _clone_mocks(monkeypatch, source,
+                 catalogue={"id": "cat_foreign", "name": "umahanova.com"},
+                 catalogue_ok=False)
+    with pytest.raises(SystemExit):
+        creatives.cmd_creative_clone(_clone_args())
+
+
+def test_clone_refuses_product_set_with_unknown_owner(monkeypatch):
+    source = _clone_source(product_set_id="555")
+    _clone_mocks(monkeypatch, source, catalogue=None)
+    with pytest.raises(SystemExit):
+        creatives.cmd_creative_clone(_clone_args())

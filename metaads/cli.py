@@ -321,6 +321,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--dsa-beneficiary")
     sp.add_argument("--pixel-id", help="Conversion pixel on promoted_object (merged, not replaced)")
     sp.add_argument("--custom-event-type", help="e.g. PURCHASE, ADD_TO_CART, LEAD")
+    sp.add_argument("--product-set-id",
+                    help="Catalogue product set on promoted_object (merged, not replaced). "
+                         "The set is resolved to its catalogue and checked against the client "
+                         "registry, so a foreign catalogue cannot slip in.")
 
     sp = _cmd(sub, "adset-duplicate", cmd_adset_duplicate, "Duplicate an ad set (PAUSED copy)", write=True)
     sp.add_argument("--adset-id", required=True)
@@ -412,6 +416,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--swap-image", help="New fallback image hash (collapses images[] to one entry)")
     sp.add_argument("--new-url", help="New landing page URL (replaces website_url in link_urls[])")
     sp.add_argument("--url-tags", help="Override URL tags (default: carried over from the source creative)")
+    sp.add_argument("--product-set-id",
+                    help="Point the clone at a different catalogue product set "
+                         "(resolved to its catalogue and checked against the client "
+                         "registry). Carried over from the source when omitted.")
     sp.add_argument("--no-enhancements", action="store_true",
                     help="Replace source enhancement spec with full opt-out (14 features OPT_OUT)")
     sp.add_argument("--swap-on-ad", help="Ad ID to point at the new creative (triggers re-review)")

@@ -536,3 +536,39 @@ def test_clone_refuses_product_set_with_unknown_owner(monkeypatch):
     _clone_mocks(monkeypatch, source, catalogue=None)
     with pytest.raises(SystemExit):
         creatives.cmd_creative_clone(_clone_args())
+
+
+# ---------------------------------------------------------------------------
+# instagram_user_id мусить лягати в object_story_spec для ВСІХ типів, не лише
+# flex. 11.11.2026: --ig-user-id на --type link приймався і МОВЧКИ зникав —
+# креатив виходив із самою сторінкою. Знайшлось за три дні до події у Львові.
+# ---------------------------------------------------------------------------
+
+def _prostyj_args(**over):
+    base = dict(name="L", type="link", page_id="123", link="https://ex.cz",
+                message=["Текст"], headline=["Заголовок"], description=None,
+                image_hash=["h1"], image_url=None, video_id=None,
+                video_thumbnail=None, call_to_action="LEARN_MORE",
+                child_attachments=None, url_tags=None, lead_gen_form_id=None,
+                ig_user_id=None, no_enhancements=True,
+                confirm=False, json=True, account_id=None)
+    base.update(over)
+    return Namespace(**base)
+
+
+def test_link_ig_user_id_lands_in_object_story_spec(monkeypatch, capsys):
+    captured = _capture_create(monkeypatch, _prostyj_args(ig_user_id="998877"))
+    oss = json.loads(captured["object_story_spec"])
+    assert oss["instagram_user_id"] == "998877"
+    assert oss["page_id"] == "123"
+
+
+def test_link_without_ig_user_id_has_no_instagram_key(monkeypatch, capsys):
+    captured = _capture_create(monkeypatch, _prostyj_args())
+    oss = json.loads(captured["object_story_spec"])
+    assert "instagram_user_id" not in oss
+
+
+def test_photo_ig_user_id_lands_in_object_story_spec(monkeypatch, capsys):
+    captured = _capture_create(monkeypatch, _prostyj_args(type="photo", ig_user_id="55"))
+    assert json.loads(captured["object_story_spec"])["instagram_user_id"] == "55"

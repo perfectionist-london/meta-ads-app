@@ -106,7 +106,7 @@ def _build_cta(cta_type: str | None, lead_form: str | None, link: str | None = N
     return cta
 
 
-def _build_flex_spec(args, page_id: str, messages: list, headlines: list,
+def _build_flex_spec(args, page_id: str, account_id, messages: list, headlines: list,
                      descriptions: list, image_hashes: list, video_ids: list) -> dict:
     """object_story_spec + asset_feed_spec params for a FLEX creative.
 
@@ -243,6 +243,20 @@ def cmd_creative_create(args) -> None:
     if args.no_enhancements:
         params["degrees_of_freedom_spec"] = _no_enhancements_spec()
 
+    # ⛔ instagram_user_id мусить лягати в object_story_spec для КОЖНОГО типу,
+    #    не лише flex. Доти --ig-user-id на --type link приймався і МОВЧКИ
+    #    зникав: креатив виходив із самою сторінкою. 11.11.2026 на цьому став
+    #    запуск ярмарку в Львові за три дні до події.
+    oss_baza: dict = {"page_id": page_id}
+    _ig = getattr(args, "ig_user_id", None)
+    if _ig and creative_type != "flex":
+        _ok_ig, _msg_ig = clients.check_ig(account_id, _ig)
+        if _msg_ig:
+            print(_msg_ig, file=sys.stderr)
+        if not _ok_ig:
+            raise SystemExit(2)
+        oss_baza["instagram_user_id"] = _ig
+
     if creative_type == "link":
         link_data: dict = {"link": args.link, "message": message or ""}
         if headline:
@@ -256,7 +270,7 @@ def cmd_creative_create(args) -> None:
         cta = _build_cta(args.call_to_action, lead_form)
         if cta:
             link_data["call_to_action"] = cta
-        params["object_story_spec"] = json.dumps({"page_id": page_id, "link_data": link_data})
+        params["object_story_spec"] = json.dumps({**oss_baza, "link_data": link_data})
 
     elif creative_type == "video":
         if not video_id:
@@ -269,13 +283,13 @@ def cmd_creative_create(args) -> None:
         cta = _build_cta(args.call_to_action, lead_form, link=args.link or "")
         if cta:
             video_data["call_to_action"] = cta
-        params["object_story_spec"] = json.dumps({"page_id": page_id, "video_data": video_data})
+        params["object_story_spec"] = json.dumps({**oss_baza, "video_data": video_data})
 
     elif creative_type == "photo":
         if not image_hash:
             _die("ERROR: --image-hash required for photo creative.")
         params["object_story_spec"] = json.dumps({
-            "page_id": page_id,
+            **oss_baza,
             "photo_data": {"image_hash": image_hash, "message": message or ""},
         })
 
@@ -291,10 +305,12 @@ def cmd_creative_create(args) -> None:
         }
         if args.call_to_action:
             link_data_c["call_to_action"] = {"type": args.call_to_action}
-        params["object_story_spec"] = json.dumps({"page_id": page_id, "link_data": link_data_c})
+        params["object_story_spec"] = json.dumps({**oss_baza, "link_data": link_data_c})
 
     elif creative_type == "flex":
-        params.update(_build_flex_spec(args, page_id, messages, headlines,
+        # ⛔ account_id передається явно: без нього clients.check_ig усередині
+        #    падав NameError на КОЖНОМУ --ig-user-id для flex.
+        params.update(_build_flex_spec(args, page_id, account_id, messages, headlines,
                                        descriptions, image_hashes, video_ids))
     else:
         _die(f"ERROR: Unknown creative type: {creative_type}")

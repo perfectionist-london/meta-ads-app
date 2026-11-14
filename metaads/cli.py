@@ -385,9 +385,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--creative-id", required=True)
 
     sp = _cmd(sub, "creative-create", cmd_creative_create,
-              "Create a creative (link/video/photo/carousel/flex)", write=True)
+              "Create a creative (link/video/photo/carousel/dpa/flex)", write=True)
     sp.add_argument("--name", required=True)
-    sp.add_argument("--type", required=True, choices=["link", "video", "photo", "carousel", "flex"])
+    sp.add_argument("--type", required=True,
+                    choices=["link", "video", "photo", "carousel", "dpa", "flex"])
     sp.add_argument("--page-id", help="Facebook Page ID (default: META_PAGE_ID from .env)")
     sp.add_argument("--message", action="append", help="Primary text (repeat for --type flex, max 5)")
     sp.add_argument("--link", help="Landing page URL")
@@ -399,6 +400,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--video-thumbnail", help="Video thumbnail URL")
     sp.add_argument("--call-to-action", help="CTA type (LEARN_MORE, SHOP_NOW, SIGN_UP, ...)")
     sp.add_argument("--child-attachments", help="JSON array for carousel")
+    sp.add_argument("--product-set-id",
+                    help="Product set for --type dpa (cards come from the catalogue, "
+                         "so dpa takes no media)")
     sp.add_argument("--url-tags", help="UTM parameters")
     sp.add_argument("--lead-gen-form-id",
                     help="Lead form ID → CTA value (link/video; requires --link, http://fb.me/ works)")

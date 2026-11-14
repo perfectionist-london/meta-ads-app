@@ -308,6 +308,97 @@ def test_insights_no_warning_without_paging_next(monkeypatch, capsys):
 
 
 # ---------------------------------------------------------------------------
+# creative-create --type dpa: динамічна карусель із набору товарів
+# ---------------------------------------------------------------------------
+
+def _dpa_args(**over):
+    база = dict(type="dpa", link="https://www.example.ua/uk/collections/bf",
+                product_set_id="999", message=None)
+    база.update(over)
+    return _create_args(**база)
+
+
+def _run_dpa(monkeypatch, args):
+    captured = {}
+    monkeypatch.setattr(api, "_api_call",
+                        lambda m, e, p=None, **k: {"product_catalog": {"id": "cat1", "name": "C"}})
+    monkeypatch.setattr(api, "mutate",
+                        lambda endpoint, params, confirm, **k: captured.update(params) or ({}, False))
+    creatives.cmd_creative_create(args)
+    return captured
+
+
+def test_dpa_builds_template_data_with_product_set(monkeypatch, capsys):
+    captured = _run_dpa(monkeypatch, _dpa_args(message="Текст"))
+    assert captured["product_set_id"] == "999"
+    td = json.loads(captured["object_story_spec"])["template_data"]
+    # картки малює Meta, тому назва мусить бути токеном, а не літералом
+    assert td["name"] == "{{product.name}}"
+    assert td["format_option"] == "carousel_images_multi_items"
+    assert td["message"] == "Текст"
+    assert td["caption"] == "example.ua"          # без www
+    assert td["call_to_action"] == {"type": "SHOP_NOW"}
+
+
+def test_dpa_without_message_omits_it(monkeypatch, capsys):
+    captured = _run_dpa(monkeypatch, _dpa_args())
+    td = json.loads(captured["object_story_spec"])["template_data"]
+    assert "message" not in td
+
+
+def test_dpa_headline_overrides_product_name_token(monkeypatch, capsys):
+    captured = _run_dpa(monkeypatch, _dpa_args(headline="Black Friday"))
+    td = json.loads(captured["object_story_spec"])["template_data"]
+    assert td["name"] == "Black Friday"
+
+
+def test_dpa_requires_product_set(monkeypatch, capsys):
+    with pytest.raises(SystemExit):
+        _run_dpa(monkeypatch, _dpa_args(product_set_id=None))
+
+
+def test_dpa_requires_link(monkeypatch, capsys):
+    with pytest.raises(SystemExit):
+        _run_dpa(monkeypatch, _dpa_args(link=None))
+
+
+def test_dpa_refuses_media(monkeypatch, capsys):
+    # медіа у dpa означає, що автор переплутав його зі --type carousel
+    for поле in ("image_hash", "image_url", "video_id", "child_attachments"):
+        with pytest.raises(SystemExit):
+            _run_dpa(monkeypatch, _dpa_args(**{поле: "x"}))
+
+
+def test_dpa_refuses_foreign_catalogue(monkeypatch, capsys):
+    monkeypatch.setattr(creatives.clients, "check_catalog",
+                        lambda acct, cat: (False, "чужий каталог"))
+    with pytest.raises(SystemExit):
+        _run_dpa(monkeypatch, _dpa_args())
+
+
+def test_dpa_refuses_product_set_without_owner(monkeypatch, capsys):
+    captured = {}
+    monkeypatch.setattr(api, "_api_call", lambda m, e, p=None, **k: {})
+    monkeypatch.setattr(api, "mutate",
+                        lambda endpoint, params, confirm, **k: captured.update(params) or ({}, False))
+    with pytest.raises(SystemExit):
+        creatives.cmd_creative_create(_dpa_args())
+
+
+def test_clone_still_carries_product_set_after_refactor(monkeypatch, capsys):
+    """Клон і dpa тепер ділять один хелпер — перевіряємо, що клон не зламався."""
+    captured = {}
+    monkeypatch.setattr(api, "_api_call", lambda m, e, p=None, **k:
+                        _clone_source(product_set_id="555") if "fields" in (p or {})
+                        and "object_story_spec" in (p or {}).get("fields", "")
+                        else {"product_catalog": {"id": "cat1", "name": "C"}})
+    monkeypatch.setattr(api, "mutate",
+                        lambda endpoint, params, confirm, **k: captured.update(params) or ({}, False))
+    creatives.cmd_creative_clone(_clone_args())
+    assert captured["product_set_id"] == "555"
+
+
+# ---------------------------------------------------------------------------
 # creative-create --type flex: asset_feed_spec from scratch (issue #3)
 # ---------------------------------------------------------------------------
 

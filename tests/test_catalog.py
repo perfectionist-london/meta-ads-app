@@ -15,9 +15,12 @@ def _scopes(monkeypatch, *scopes):
 
 
 def _create_args(**kw):
+    # account_id мусить бути: cmd_product_set_create перевіряє власника
+    # каталогу через account_of(args), і без поля падав AttributeError —
+    # шість тестів product-set-create стояли червоні, а не перевіряли нічого.
     base = dict(catalog_id="123", name="Футболки",
                 filter='{"product_type": {"i_contains": "T-Shirt"}}',
-                confirm=False, json=True)
+                confirm=False, json=True, account_id=None)
     base.update(kw)
     return Namespace(**base)
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 import copy
 import json
 import sys
+from urllib.parse import urlparse
 
 from metaads import api, clients, lint
 from metaads.commands.common import account_of, drop_deleted, parse_json_arg
@@ -192,10 +193,34 @@ def _resolve_page(args, account_id):
     return str(page_id)
 
 
+def _resolve_product_set(account_id, product_set_id):
+    """Set ТІЛЬКИ з каталогу цього клієнта. Повертає id рядком.
+
+    Та сама перевірка, що в creative-clone: Meta віддає з кабінету й чужі
+    каталоги (umahanova, Perfectionist), тож власника звіряємо з реєстром.
+    Одне правило живе в одному місці — міняти тут, не копіювати.
+    """
+    owner = api._api_call("GET", str(product_set_id),
+                          {"fields": "product_catalog{id,name}"})
+    cat = owner.get("product_catalog") or {}
+    cat_id = cat.get("id")
+    if not cat_id:
+        _die(f"ERROR: product set {product_set_id} returned no owning catalogue "
+             f"— refusing to build a creative on a set whose owner is unknown.")
+    ok, msg = clients.check_catalog(account_id, cat_id)
+    if msg:
+        print(msg, file=sys.stderr)
+    if not ok:
+        _die(f"ERROR: product set {product_set_id} lives in catalogue {cat_id} "
+             f"({cat.get('name')}), which is not this client's.")
+    return str(product_set_id)
+
+
 def cmd_creative_create(args) -> None:
     """Create a new ad creative (dry-run/validate by default).
 
-    Types: link/video/photo/carousel build object_story_spec; flex builds an
+    Types: link/video/photo/carousel build object_story_spec; dpa builds a
+    template_data carousel driven by a product set; flex builds an
     asset_feed_spec (multiple texts + media, no customization rules).
     """
     account_id = account_of(args)
@@ -306,6 +331,43 @@ def cmd_creative_create(args) -> None:
         if args.call_to_action:
             link_data_c["call_to_action"] = {"type": args.call_to_action}
         params["object_story_spec"] = json.dumps({**oss_baza, "link_data": link_data_c})
+
+    elif creative_type == "dpa":
+        # Динамічна карусель із каталогу. Відрізняється від --type carousel
+        # тим, що карточки малює Meta з набору товарів, а не ми з
+        # --child-attachments: саме тому тут немає ні картинок, ні хешів.
+        # Токени {{product.*}} підставляє Meta на показі.
+        product_set_id = getattr(args, "product_set_id", None)
+        if not product_set_id:
+            _die("ERROR: --product-set-id required for dpa creative.")
+        if not args.link:
+            _die("ERROR: --link required for dpa creative (fallback for the "
+                 "whole carousel; per-product URLs come from the catalogue).")
+        if image_hash or args.image_url or video_id or args.child_attachments:
+            _die("ERROR: dpa creative takes no media: Meta renders the cards from "
+                 "the product set. Drop --image-hash/--image-url/--video-id/"
+                 "--child-attachments.")
+        template: dict = {
+            "link": args.link,
+            # Назва карточки = назва товару. Літерал тут був би однаковим
+            # підписом під усіма товарами каруселі.
+            "name": headline or "{{product.name}}",
+            "format_option": "carousel_images_multi_items",
+            "multi_share_end_card": False,
+        }
+        if message:
+            template["message"] = message
+        if description:
+            template["description"] = description
+        host = (urlparse(args.link).hostname or "").removeprefix("www.")
+        if host:
+            template["caption"] = host
+        cta_type = args.call_to_action or "SHOP_NOW"
+        if not args.call_to_action:
+            print("NOTE: --call-to-action not given, using SHOP_NOW.", file=sys.stderr)
+        template["call_to_action"] = {"type": cta_type}
+        params["object_story_spec"] = json.dumps({**oss_baza, "template_data": template})
+        params["product_set_id"] = _resolve_product_set(account_id, product_set_id)
 
     elif creative_type == "flex":
         # ⛔ account_id передається явно: без нього clients.check_ig усередині
@@ -421,20 +483,7 @@ def cmd_creative_clone(args) -> None:
     # --product-set-id point the clone at a different set.
     product_set_id = getattr(args, "product_set_id", None) or orig.get("product_set_id")
     if product_set_id:
-        owner = api._api_call("GET", str(product_set_id),
-                              {"fields": "product_catalog{id,name}"})
-        cat = (owner.get("product_catalog") or {})
-        cat_id = cat.get("id")
-        if not cat_id:
-            _die(f"ERROR: product set {product_set_id} returned no owning catalogue "
-                 f"— refusing to build a creative on a set whose owner is unknown.")
-        ok, msg = clients.check_catalog(account_id, cat_id)
-        if msg:
-            print(msg, file=sys.stderr)
-        if not ok:
-            _die(f"ERROR: product set {product_set_id} lives in catalogue {cat_id} "
-                 f"({cat.get('name')}), which is not this client's.")
-        payload["product_set_id"] = str(product_set_id)
+        payload["product_set_id"] = _resolve_product_set(account_id, product_set_id)
     if args.no_enhancements:
         payload["degrees_of_freedom_spec"] = _no_enhancements_spec()
     elif dof:

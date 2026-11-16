@@ -232,7 +232,7 @@ def _create_args(**over):
                 headline=None, description=None, image_hash=None, image_url=None,
                 video_id=None, video_thumbnail=None, call_to_action=None,
                 child_attachments=None, url_tags=None, no_enhancements=False,
-                confirm=False, json=True, account_id=None)
+                enhancement=None, confirm=False, json=True, account_id=None)
     base.update(over)
     return Namespace(**base)
 
@@ -260,6 +260,51 @@ def test_creative_create_default_sends_no_dof(monkeypatch, capsys):
                         lambda endpoint, params, confirm, **k: captured.update(params) or ({}, False))
     creatives.cmd_creative_create(_create_args())
     assert "degrees_of_freedom_spec" not in captured
+
+
+def test_creative_create_selective_opt_in(monkeypatch, capsys):
+    """--enhancement opts the named features IN and every standard one OUT."""
+    captured = {}
+    monkeypatch.setattr(api, "mutate",
+                        lambda endpoint, params, confirm, **k: captured.update(params) or ({}, False))
+    creatives.cmd_creative_create(_create_args(
+        enhancement=["catalog_feed_tag", "standard_enhancements_catalog"]))
+    spec = json.loads(captured["degrees_of_freedom_spec"])["creative_features_spec"]
+    assert spec["catalog_feed_tag"] == {"enroll_status": "OPT_IN"}
+    assert spec["standard_enhancements_catalog"] == {"enroll_status": "OPT_IN"}
+    opted_out = {k for k, v in spec.items() if v["enroll_status"] == "OPT_OUT"}
+    assert opted_out == set(creatives.ENHANCEMENT_FEATURES)
+
+
+def test_creative_create_opt_in_of_a_standard_feature_is_not_also_opted_out(monkeypatch):
+    """A name in both lists must end up OPT_IN only — no duplicate key fight."""
+    captured = {}
+    monkeypatch.setattr(api, "mutate",
+                        lambda endpoint, params, confirm, **k: captured.update(params) or ({}, False))
+    creatives.cmd_creative_create(_create_args(enhancement=["image_uncrop"]))
+    spec = json.loads(captured["degrees_of_freedom_spec"])["creative_features_spec"]
+    assert spec["image_uncrop"] == {"enroll_status": "OPT_IN"}
+    assert len(spec) == len(creatives.ENHANCEMENT_FEATURES)
+
+
+def test_creative_create_rejects_unknown_feature_name(monkeypatch):
+    """⛔ Meta DROPS an unknown feature name silently, so a typo must fail here.
+
+    Without this, `--enhancement catalog_feed_taq` would create a creative that
+    looks configured and carries nothing.
+    """
+    monkeypatch.setattr(api, "mutate",
+                        lambda endpoint, params, confirm, **k: ({}, False))
+    with pytest.raises(SystemExit):
+        creatives.cmd_creative_create(_create_args(enhancement=["catalog_feed_taq"]))
+
+
+def test_creative_create_opt_in_and_opt_out_are_mutually_exclusive(monkeypatch):
+    monkeypatch.setattr(api, "mutate",
+                        lambda endpoint, params, confirm, **k: ({}, False))
+    with pytest.raises(SystemExit):
+        creatives.cmd_creative_create(_create_args(
+            enhancement=["hide_price"], no_enhancements=True))
 
 
 def test_creative_from_post_no_enhancements(monkeypatch, capsys):

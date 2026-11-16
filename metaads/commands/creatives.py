@@ -265,7 +265,13 @@ def cmd_creative_create(args) -> None:
     params: dict = {"name": args.name}
     if args.url_tags:
         params["url_tags"] = args.url_tags
-    if args.no_enhancements:
+    _opt_in = getattr(args, "enhancement", None)
+    if _opt_in and args.no_enhancements:
+        _die("ERROR: --enhancement and --no-enhancements are mutually exclusive. "
+             "--enhancement already opts every other feature OUT.")
+    if _opt_in:
+        params["degrees_of_freedom_spec"] = _enhancements_spec(_opt_in)
+    elif args.no_enhancements:
         params["degrees_of_freedom_spec"] = _no_enhancements_spec()
 
     # ⛔ instagram_user_id мусить лягати в object_story_spec для КОЖНОГО типу,
@@ -412,6 +418,44 @@ def _no_enhancements_spec() -> str:
     return json.dumps({"creative_features_spec": {
         f: {"enroll_status": "OPT_OUT"} for f in ENHANCEMENT_FEATURES
     }})
+
+
+# Catalogue-only creative features. Live DPA creative objects carry these in
+# degrees_of_freedom_spec.creative_features_spec, but Meta's public 46-feature
+# reference documents them poorly or not at all (2026-11-16):
+#   catalog_feed_tag               ABSENT from the reference entirely
+#   standard_enhancements_catalog  name only, no description
+#   hide_price                     name only, no description
+#   product_tags / customize_product_recommendation / dha_optimization
+#                                  listed, catalogue-scoped
+# They are accepted on create, so they are opt-in-able — but behaviour has to
+# be read off a rendered preview, not off the docs.
+CATALOG_FEATURES = [
+    "catalog_feed_tag", "standard_enhancements_catalog", "hide_price",
+    "product_tags", "customize_product_recommendation", "dha_optimization",
+]
+
+ENHANCEMENT_OPT_IN_ALLOWED = ENHANCEMENT_FEATURES + CATALOG_FEATURES
+
+
+def _enhancements_spec(opt_in: list) -> str:
+    """degrees_of_freedom_spec with the named features OPT_IN, the rest OPT_OUT.
+
+    ⛔ Names are validated locally ON PURPOSE. Meta silently DROPS an unknown
+    field name instead of erroring (verified 2026-11-15 with a nonsense control
+    name), so a typo here would produce a creative that looks configured and
+    carries nothing. A wrong name must fail loudly, before the write.
+    """
+    bad = [f for f in opt_in if f not in ENHANCEMENT_OPT_IN_ALLOWED]
+    if bad:
+        _die("ERROR: unknown creative feature(s): " + ", ".join(bad) + "\n"
+             "Meta silently ignores unknown feature names, so this is rejected here.\n"
+             "Known: " + ", ".join(ENHANCEMENT_OPT_IN_ALLOWED))
+    spec = {f: {"enroll_status": "OPT_OUT"}
+            for f in ENHANCEMENT_FEATURES if f not in opt_in}
+    for f in opt_in:
+        spec[f] = {"enroll_status": "OPT_IN"}
+    return json.dumps({"creative_features_spec": spec})
 
 
 def cmd_creative_clone(args) -> None:

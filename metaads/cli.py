@@ -410,6 +410,12 @@ def build_parser() -> argparse.ArgumentParser:
                     help="IG identity for flex (or use --no-enhancements → page-backed identity, PBIA)")
     sp.add_argument("--no-enhancements", action="store_true",
                     help="Opt out of all Advantage+ enhancements (14 features, enroll_status=OPT_OUT)")
+    sp.add_argument("--enhancement", action="append", metavar="FEATURE",
+                    help="Opt this creative feature IN, every other one OUT (repeatable). "
+                         "Catalogue-scoped: catalog_feed_tag, standard_enhancements_catalog, "
+                         "hide_price, product_tags, customize_product_recommendation, "
+                         "dha_optimization. Unknown names are rejected locally — Meta drops "
+                         "them silently. Mutually exclusive with --no-enhancements.")
 
     sp = _cmd(sub, "creative-clone", cmd_creative_clone,
               "Clone an Advantage+ creative, swapping video/image/URL", write=True)
